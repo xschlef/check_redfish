@@ -350,7 +350,7 @@ class RedfishConnection():
             if redfish_response.status == 401:
                 self.get_credentials()
                 if self.username is None or self.password is None:
-                    self.exit_on_error(f"Username and Password needed to connect to this BMC")
+                    self.exit_on_error("Username and Password needed to connect to this BMC")
 
             if redfish_response.status != 404 and redfish_response.status >= 400 and self.session_was_restored is True:
 
@@ -1953,6 +1953,8 @@ def get_single_system_mem(redfish_url):
 
     if num_dimms == 0:
         plugin.add_output_data("UNKNOWN", f"No memory data returned for API URL '{redfish_url}'")
+    elif args.critical and num_dimms <= int(args.critical):
+        plugin.add_output_data("CRITICAL", f"Only {num_dimms} memory modules found. Should be {int(args.critical)+1}", summary = True)
     else:
         plugin.add_output_data("OK", f"All {num_dimms} memory modules (Total %.1fGB) are in good condition" % (size_sum / 1024), summary = True)
 
@@ -2749,6 +2751,110 @@ def get_storage_generic(system):
 
         plugin.add_output_data("OK" if enclosure_inventory.health_status in ["OK", None] else enclosure_inventory.health_status, status_text)
 
+    def get_drive_ami(drive_link):
+        drive_response = plugin.rf.get(drive_link)
+
+        if drive_response.get("Name") is None:
+            plugin.add_output_data("UNKNOWN", f"Unable to retrieve disk infos: {drive_link}")
+            return
+
+        # get status data
+        status_data = get_status_data(drive_response.get("Status"))
+
+        # get disk size
+        disk_size = None
+        if drive_response.get("CapacityLogicalBlocks") is not None and \
+           drive_response.get("BlockSizeBytes") is not None:
+            disk_size = int(drive_response.get("CapacityLogicalBlocks")) * int(drive_response.get("BlockSizeBytes"))
+        elif drive_response.get("CapacityBytes"):
+            disk_size = drive_response.get("CapacityBytes")
+        elif drive_response.get("CapacityMiB"):
+            disk_size = int(drive_response.get("CapacityMiB")) * 1024 ** 2
+        elif drive_response.get("CapacityGB"):
+            disk_size = drive_response.get("CapacityGB") * 1000 ** 3
+
+        
+        drive_oem_data = grab(drive_response, f"Oem.%s" % list(drive_response.get("Oem"))[0])
+
+        temperature = None
+        bay = None
+        storage_port = None
+        power_on_hours = drive_response.get("PowerOnHours")
+        if drive_oem_data is not None:
+            temperature = drive_oem_data.get("TemperatureCelsius") or drive_oem_data.get("TemperatureC")
+            if power_on_hours is None:
+                power_on_hours = drive_oem_data.get("HoursOfPoweredUp") or drive_oem_data.get("PowerOnHours")
+            bay = drive_oem_data.get("SlotNumber")
+
+        interface_speed = None
+        if drive_response.get("NegotiatedSpeedGbs") is not None:
+            interface_speed = int(drive_response.get("NegotiatedSpeedGbs")) * 1000
+
+        encrypted = None
+        if drive_response.get("EncryptionStatus") is not None:
+            if drive_response.get("EncryptionStatus").lower() == "encrypted":
+                encrypted = True
+            else:
+                encrypted = False
+
+        pd_inventory = PhysicalDrive(
+            # drive id repeats per controller
+            # prefix drive id with controller id
+            id = "Śystem:{}:{}".format(system_response.get("Id"), drive_response.get("Id")),
+            name  = drive_response.get("Name"),
+            health_status = status_data.get("Health"),
+            operation_status = status_data.get("State"),
+            model = drive_response.get("Model"),
+            manufacturer = drive_response.get("Manufacturer"),
+            firmware = drive_response.get("FirmwareVersion") or drive_response.get("Revision"),
+            serial = drive_response.get("SerialNumber"),
+            location = grab(drive_response, "Location.0.Info") or grab(drive_response, "PhysicalLocation.0.Info"),
+            type = drive_response.get("MediaType"),
+            speed_in_rpm = drive_response.get("RotationalSpeedRpm") or drive_response.get("RotationSpeedRPM"),
+            failure_predicted = drive_response.get("FailurePredicted"),
+            predicted_media_life_left_percent = drive_response.get("PredictedMediaLifeLeftPercent"),
+            part_number = drive_response.get("PartNumber"),
+            size_in_byte = disk_size,
+            power_on_hours = power_on_hours,
+            interface_type = drive_response.get("Protocol"),
+            interface_speed = interface_speed,
+            encrypted = encrypted,
+            storage_port = storage_port,
+            bay = bay,
+            temperature = temperature,
+            system_ids = system_response.get("Id"),
+        )
+
+        if args.verbose:
+            pd_inventory.source_data = drive_response
+
+        plugin.inventory.add(pd_inventory)
+
+        #plugin.inventory.append(StorageController, "System%s" % system_response.get("Id"), "logical_drive_ids", pd_inventory.id)
+
+        if pd_inventory.location is None or pd_inventory.name == pd_inventory.location:
+            if bay:
+                location_string = f"Slot: {bay} "
+            else:
+                location_string = ""
+        else:
+            location_string = f"{pd_inventory.location} "
+            if not location_string:
+                if bay:
+                    location_string = f"Slot: {bay} "
+
+        if pd_inventory.health_status is not None:
+            drives_status_list.append(pd_inventory.health_status)
+
+        if pd_inventory.size_in_byte is not None and pd_inventory.size_in_byte > 0:
+            size_string = "%0.2fGiB" % (pd_inventory.size_in_byte / ( 1024 ** 3))
+        else:
+            size_string = "0GiB"
+
+        status_text = f"Physical Drive {pd_inventory.name} {location_string}({pd_inventory.model} / {pd_inventory.type} / {pd_inventory.interface_type}) {size_string} status: {pd_inventory.health_status}"
+
+        plugin.add_output_data("OK" if pd_inventory.health_status in ["OK", None] else pd_inventory.health_status, status_text)
+
     def condensed_status_from_list(status_list):
 
         status = None
@@ -2789,14 +2895,11 @@ def get_storage_generic(system):
     enclosure_status_list = list()
 
     if storage_response is not None:
-
         for storage_member in storage_response.get("Members"):
-
             if storage_member.get("@odata.context"):
                 controller_response = storage_member
             else:
                 controller_response = plugin.rf.get(storage_member.get("@odata.id"))
-
             if controller_response.get("StorageControllers"):
 
                 # if StorageControllers is just a dict then wrap it in a list (like most vendors do it)
@@ -2904,7 +3007,11 @@ def get_storage_generic(system):
                         else:
                             get_enclosures(enclosure_link.get("@odata.id"))
             else:
-                plugin.add_output_data("UNKNOWN", "No array controller data returned for API URL '%s'" % controller_response.get("@odata.id"))
+                for controller_drive in controller_response.get("Drives"):
+                    system_drives_list.append(controller_drive.get("@odata.id"))
+                    get_drive_ami(controller_drive.get("@odata.id"))
+                if "Drives" not in controller_response:
+                    plugin.add_output_data("UNKNOWN", "No array controller data returned for API URL '%s'" % controller_response.get("@odata.id"))
 
     # check SimpleStorage
     simple_storage_link = grab(system_response, "SimpleStorage/@odata.id", separator="/")
@@ -3220,6 +3327,8 @@ def get_event_log_generic(type, system_manager_id):
             redfish_url = f"{system_manager_id}/LogServices/SEL/Entries/"
         elif plugin.rf.vendor == "Lenovo":
             redfish_url = f"{system_manager_id}/LogServices/ActiveLog/Entries/"
+        elif plugin.rf.vendor == "Ami":
+            redfish_url = f"{system_manager_id}/LogServices/SEL/Entries/"
     else:
         if plugin.rf.vendor == "Dell":
             redfish_url = f"{system_manager_id}/Logs/Lclog"
@@ -3229,6 +3338,8 @@ def get_event_log_generic(type, system_manager_id):
             redfish_url = f"{system_manager_id}/LogServices/CIMC/Entries/"
         elif plugin.rf.vendor == "Lenovo":
             redfish_url = f"{system_manager_id}/LogServices/StandardLog/Entries/"
+        elif plugin.rf.vendor == "Ami":
+            redfish_url = f"{system_manager_id}/LogServices/EventLog/Entries/"
 
     # try to discover log service
     if redfish_url is None:
@@ -3253,7 +3364,7 @@ def get_event_log_generic(type, system_manager_id):
                         break
 
     if redfish_url is None:
-        plugin.add_output_data("UNKNOWN", f"No log services discoverd in {system_manager_id}/LogServices that match {type}")
+        plugin.add_output_data("UNKNOWN", f"No log services discovered in {system_manager_id}/LogServices that match {type}")
         return
 
     if args.warning:
@@ -4363,6 +4474,11 @@ def get_basic_system_info():
             plugin.rf.vendor = "Fujitsu"
 
             plugin.rf.vendor_data = VendorFujitsuData()
+        
+        if vendor_string in ["Ami"]:
+            plugin.rf.vendor = "Ami"
+
+            plugin.rf.vendor_data = VendorGeneric()
 
     if "CIMC" in str(plugin.rf.connection.system_properties.get("managers")):
         plugin.rf.vendor = "Cisco"
