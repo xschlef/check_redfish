@@ -4,6 +4,10 @@ This is a monitoring/inventory plugin to check components and
 health status of systems which support Redfish.
 It will also create a inventory of all components of a system.
 
+## Why this fork
+This fork adds some hackish features for AMI/Gigabyte based redfish implementations.
+The memory parameter now supports --critical to check for the amount of DIMMs.
+
 ## Requirements
 * python >= 3.6
 * redfish >= 2.1.4
