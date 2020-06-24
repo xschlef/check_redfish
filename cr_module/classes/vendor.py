@@ -156,4 +156,18 @@ class VendorCiscoData(VendorGeneric):
     manager_event_log_entries_path = "{system_manager_id}/LogServices/CIMC/Entries/"
     system_event_log_entries_path = "{system_manager_id}/LogServices/SEL/Entries/"
 
+
+class VendorGigabyteData(VendorGeneric):
+
+    name = "Gigabyte"
+    expand_string = ""
+
+    # only "managers" and "systems" are valid values
+    manager_event_log_location = "managers"
+    system_event_log_location = "managers"
+
+    manager_event_log_entries_path = "{system_manager_id}/LogServices/EventLog/Entries/"
+    system_event_log_entries_path = "{system_manager_id}/LogServices/SEL/Entries/"
+
+
 # EOF

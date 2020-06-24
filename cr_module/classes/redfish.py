@@ -63,7 +63,6 @@ class RedfishConnection:
         exit(plugin_status_types.get(level))
 
     def get_credentials(self):
-
         """
             Order of credential reading from highest to lowest priority
             1. cli_args username and password
@@ -93,9 +92,11 @@ class RedfishConnection:
                             self.password = var.strip()
 
             except FileNotFoundError:
-                self.exit_on_error("Provided authentication file not found: %s" % self.cli_args.authfile)
+                self.exit_on_error(
+                    "Provided authentication file not found: %s" % self.cli_args.authfile)
             except PermissionError:
-                self.exit_on_error("Error opening authentication file: %s" % self.cli_args.authfile)
+                self.exit_on_error(
+                    "Error opening authentication file: %s" % self.cli_args.authfile)
             except Exception as e:
                 self.exit_on_error(
                     "Unknown exception while trying to open authentication file %s: %s" % self.cli_args.authfile,
@@ -126,7 +127,8 @@ class RedfishConnection:
 
         # check if directory is a file
         if os.path.isfile(session_file_dir):
-            self.exit_on_error("The session file destination (%s) seems to be file." % session_file_dir)
+            self.exit_on_error(
+                "The session file destination (%s) seems to be file." % session_file_dir)
 
         # check if directory exists
         if not os.path.exists(session_file_dir):
@@ -134,14 +136,16 @@ class RedfishConnection:
             try:
                 os.makedirs(session_file_dir, 0o700)
             except OSError:
-                self.exit_on_error("Unable to create session file directory: %s." % session_file_dir)
+                self.exit_on_error(
+                    "Unable to create session file directory: %s." % session_file_dir)
             except Exception as e:
                 self.exit_on_error("Unknown exception while creating session file directory %s: %s" % session_file_dir,
                                    str(e))
 
         # check if directory is writable
         if not os.access(session_file_dir, os.X_OK | os.W_OK):
-            self.exit_on_error("Error writing to session file directory: %s" % session_file_dir)
+            self.exit_on_error(
+                "Error writing to session file directory: %s" % session_file_dir)
 
         # get full path to session file
         if self.cli_args.sessionfile:
@@ -149,13 +153,16 @@ class RedfishConnection:
         else:
             sessionfilename = default_session_file_prefix + self.cli_args.host
 
-        sessionfilepath = os.path.normpath(session_file_dir) + os.sep + sessionfilename + default_session_file_suffix
+        sessionfilepath = os.path.normpath(
+            session_file_dir) + os.sep + sessionfilename + default_session_file_suffix
 
         if os.path.exists(sessionfilepath) and not os.access(sessionfilepath, os.R_OK):
-            self.exit_on_error("Got no permission to read existing session file: %s" % sessionfilepath)
+            self.exit_on_error(
+                "Got no permission to read existing session file: %s" % sessionfilepath)
 
         if os.path.exists(sessionfilepath) and not os.access(sessionfilepath, os.W_OK):
-            self.exit_on_error("Got no permission to write to existing session file: %s" % sessionfilepath)
+            self.exit_on_error(
+                "Got no permission to write to existing session file: %s" % sessionfilepath)
 
         return sessionfilepath
 
@@ -220,7 +227,8 @@ class RedfishConnection:
             with open(self.session_file_path, 'wb') as pickled_session:
                 pickle.dump(self.connection, pickled_session)
         except PermissionError as e:
-            self.exit_on_error("Error opening session file to save session: %s" % str(e))
+            self.exit_on_error(
+                "Error opening session file to save session: %s" % str(e))
         except Exception as e:
 
             # log out from current connection
@@ -261,26 +269,30 @@ class RedfishConnection:
             self.connection = redfish.redfish_client(base_url="https://%s" % self.cli_args.host,
                                                      max_retry=self.cli_args.retries, timeout=self.cli_args.timeout)
         except redfish.rest.v1.ServerDownOrUnreachableError:
-            self.exit_on_error("Host '%s' down or unreachable." % self.cli_args.host, "CRITICAL")
+            self.exit_on_error("Host '%s' down or unreachable." %
+                               self.cli_args.host, "CRITICAL")
         except redfish.rest.v1.RetriesExhaustedError:
             self.exit_on_error("Unable to connect to Host '%s', max retries exhausted." % self.cli_args.host,
                                "CRITICAL")
         except Exception as e:
-            self.exit_on_error("Unable to connect to Host '%s': %s" % (self.cli_args.host, str(e)), "CRITICAL")
+            self.exit_on_error("Unable to connect to Host '%s': %s" % (
+                self.cli_args.host, str(e)), "CRITICAL")
 
         if not self.connection:
             raise Exception("Unable to establish connection.")
 
         if self.username is not None or self.password is not None:
             try:
-                self.connection.login(username=self.username, password=self.password, auth="session")
+                self.connection.login(
+                    username=self.username, password=self.password, auth="session")
             except redfish.rest.v1.RetriesExhaustedError:
                 self.exit_on_error("Unable to connect to Host '%s', max retries exhausted." % self.cli_args.host,
                                    "CRITICAL")
             except redfish.rest.v1.InvalidCredentialsError:
                 self.exit_on_error("Username or password invalid.", "CRITICAL")
             except Exception as e:
-                self.exit_on_error("Unable to connect to Host '%s': %s" % (self.cli_args.host, str(e)), "CRITICAL")
+                self.exit_on_error("Unable to connect to Host '%s': %s" % (
+                    self.cli_args.host, str(e)), "CRITICAL")
 
         if self.connection is not None:
             self.connection.system_properties = None
@@ -306,7 +318,8 @@ class RedfishConnection:
             if redfish_response.status == 401:
                 self.get_credentials()
                 if self.username is None or self.password is None:
-                    self.exit_on_error(f"Username and Password needed to connect to this BMC")
+                    self.exit_on_error(
+                        f"Username and Password needed to connect to this BMC")
 
             if redfish_response.status != 404 and redfish_response.status >= 400 and self.session_was_restored is True:
                 # reset connection
@@ -325,7 +338,8 @@ class RedfishConnection:
                 pprint.pprint(redfish_response_json_data, stream=sys.stderr)
 
             if redfish_response_json_data.get("error"):
-                error = redfish_response_json_data.get("error").get("@Message.ExtendedInfo")
+                error = redfish_response_json_data.get(
+                    "error").get("@Message.ExtendedInfo")
                 self.exit_on_error(
                     "got error '%s' for API path '%s'" % (error[0].get("MessageId"), error[0].get("MessageArgs")))
 
@@ -350,7 +364,8 @@ class RedfishConnection:
             if self.vendor_data.view_response:
                 return self.vendor_data.view_response
 
-            redfish_response = self._rf_post("/redfish/v1/Views/", self.vendor_data.view_select)
+            redfish_response = self._rf_post(
+                "/redfish/v1/Views/", self.vendor_data.view_select)
 
             # session invalid
             if redfish_response.status != 404 and redfish_response.status >= 400 and self.session_was_restored is True:
@@ -358,7 +373,8 @@ class RedfishConnection:
                 self.init_connection(reset=True)
 
                 # query again
-                redfish_response = self._rf_post("/redfish/v1/Views/", self.vendor_data.view_select)
+                redfish_response = self._rf_post(
+                    "/redfish/v1/Views/", self.vendor_data.view_select)
 
             # test if response is valid json and can be decoded
             redfish_response_json_data = None
@@ -372,7 +388,8 @@ class RedfishConnection:
                     pprint.pprint(redfish_response_json_data)
 
                 if redfish_response_json_data.get("error"):
-                    error = redfish_response_json_data.get("error").get("@Message.ExtendedInfo")
+                    error = redfish_response_json_data.get(
+                        "error").get("@Message.ExtendedInfo")
                     self.exit_on_error(
                         "get error '%s' for API path '%s'" % (error[0].get("MessageId"), error[0].get("MessageArgs")))
 
@@ -400,12 +417,16 @@ class RedfishConnection:
 
                 self.vendor_data = VendorHPEData()
 
-                manager_data = grab(self.connection.root, f"Oem.{vendor_string}.Manager.0")
+                manager_data = grab(self.connection.root,
+                                    f"Oem.{vendor_string}.Manager.0")
 
                 if manager_data is not None:
-                    self.vendor_data.ilo_hostname = manager_data.get("HostName")
-                    self.vendor_data.ilo_version = manager_data.get("ManagerType")
-                    self.vendor_data.ilo_firmware_version = manager_data.get("ManagerFirmwareVersion")
+                    self.vendor_data.ilo_hostname = manager_data.get(
+                        "HostName")
+                    self.vendor_data.ilo_version = manager_data.get(
+                        "ManagerType")
+                    self.vendor_data.ilo_firmware_version = manager_data.get(
+                        "ManagerFirmwareVersion")
 
                     if self.vendor_data.ilo_version.lower() == "ilo 5":
                         self.vendor_data.view_supported = True
@@ -425,6 +446,10 @@ class RedfishConnection:
             if vendor_string in ["ts_fujitsu"]:
 
                 self.vendor_data = VendorFujitsuData()
+
+            if vendor_string in ["Gigabyte", "Ami"]:
+
+                self.vendor_data = VendorGigabyteData()
 
         # Cisco does not provide a OEM property in root object
         if "CIMC" in str(self.get_system_properties("managers")):
@@ -456,7 +481,8 @@ class RedfishConnection:
             if self.connection.root.get(root_object) is None:
                 continue
 
-            rf_path = self.get(self.connection.root.get(root_object).get("@odata.id"))
+            rf_path = self.get(self.connection.root.get(
+                root_object).get("@odata.id"))
 
             if rf_path is None:
                 continue
@@ -471,7 +497,8 @@ class RedfishConnection:
                         ("RAID" in entity.get("@odata.id") or "Enclosure" in entity.get("@odata.id")):
                     continue
 
-                system_properties[root_object.lower()].append(entity.get("@odata.id"))
+                system_properties[root_object.lower()].append(
+                    entity.get("@odata.id"))
 
         self.connection.system_properties = system_properties
         self.save_session_to_file()
@@ -499,7 +526,8 @@ class RedfishConnection:
         """
 
         if requested_property is not None and requested_property not in ["chassis", "managers", "systems"]:
-            raise Exception(f"Invalid property '{requested_property}' requested.")
+            raise Exception(
+                f"Invalid property '{requested_property}' requested.")
 
         if self.connection.system_properties is None:
             self.discover_system_properties()
